@@ -3,3 +3,6 @@ numpy
 jupyter
 matplotlib
 seaborn
+scikit-learn
+textblob
+nltk
