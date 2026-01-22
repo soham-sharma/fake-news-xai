@@ -1,0 +1,3 @@
+data:
+  raw_true: "data/raw/True.csv"
+  raw_fake: "data/raw/Fake.csv"
