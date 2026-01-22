@@ -1,2 +1,2 @@
 # Fake News XAI
-Initial project structure for fake news detection and explanation.
+Project for comparing traditional ML and Deep Learning approaches for fake news detection, with a focus on explainability.
