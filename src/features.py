@@ -10,3 +10,7 @@ class FeatureEngineer:
     def extract_sentiment(self, texts):
         print("extracting sentiment...")
         return [TextBlob(str(t)).sentiment.polarity for t in texts]
+    
+    def extract_readability(self, texts):
+        import textstat
+        return [textstat.flesch_kincaid_grade(str(t)) for t in texts]
