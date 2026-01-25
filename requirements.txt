@@ -6,3 +6,6 @@ seaborn
 scikit-learn
 textblob
 nltk
+textstat
+joblib
+pyyaml
