@@ -8,3 +8,7 @@ class DecisionTreeExplainer:
     def train(self, X, y):
         print("Training decision tree...")
         self.model.fit(X, y)
+    def evaluate(self, X, y):
+        from sklearn.metrics import accuracy_score
+        preds = self.model.predict(X)
+        print("Accuracy:", accuracy_score(y, preds))
