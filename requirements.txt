@@ -9,3 +9,4 @@ nltk
 textstat
 joblib
 pyyaml
+shap
