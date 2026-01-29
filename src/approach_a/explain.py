@@ -8,3 +8,7 @@ class TreeExplainer:
         
     def get_shap(self, X):
         return self.explainer.shap_values(X)
+    
+    def test_waterfall(self, X_sample):
+        # working out the bug where shap expected values is an array
+        pass
