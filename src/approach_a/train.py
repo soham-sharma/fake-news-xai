@@ -1,14 +1,12 @@
-import pandas as pd
+import yaml
+import logging
 from sklearn.tree import DecisionTreeClassifier
 
 class DecisionTreeExplainer:
-    def __init__(self, max_depth=5):
-        self.model = DecisionTreeClassifier(max_depth=max_depth)
-        
-    def train(self, X, y):
-        print("Training decision tree...")
-        self.model.fit(X, y)
-    def evaluate(self, X, y):
-        from sklearn.metrics import accuracy_score
-        preds = self.model.predict(X)
-        print("Accuracy:", accuracy_score(y, preds))
+    def __init__(self, config_path):
+        with open(config_path, "r") as f:
+            self.config = yaml.safe_load(f)
+            
+    def train(self, X_train, y_train, depth):
+        # Needs cross validation
+        pass
