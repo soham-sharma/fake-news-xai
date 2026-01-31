@@ -10,3 +10,6 @@ class DecisionTreeExplainer:
     def train(self, X_train, y_train, depth):
         # Needs cross validation
         pass
+    def evaluate(self, model, X_test, y_test):
+        # To be implemented properly with F1, ROC
+        pass
