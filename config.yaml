@@ -1,3 +1,7 @@
 data:
   raw_true: "data/raw/True.csv"
   raw_fake: "data/raw/Fake.csv"
+models:
+  decision_tree:
+    depth_range: [4, 6, 8, 10, 12]
+random_seed: 42
