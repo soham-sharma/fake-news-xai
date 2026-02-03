@@ -1,14 +1,12 @@
 import shap
-import matplotlib.pyplot as plt
+import numpy as np
 
 class TreeExplainer:
-    def __init__(self, model):
+    def __init__(self, model, feature_names):
         self.model = model
+        self.feature_names = list(feature_names)
         self.explainer = shap.TreeExplainer(model)
         
-    def get_shap(self, X):
-        return self.explainer.shap_values(X)
-    
-    def test_waterfall(self, X_sample):
-        # working out the bug where shap expected values is an array
+    def _coerce_shap_values(self, values):
+        # dealing with new shap API format
         pass
