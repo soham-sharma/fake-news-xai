@@ -10,3 +10,6 @@ class TreeExplainer:
     def _coerce_shap_values(self, values):
         # dealing with new shap API format
         pass
+    def _decision_path_rules(self):
+        # extracting if-then branches from tree object
+        pass
