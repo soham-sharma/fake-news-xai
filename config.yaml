@@ -1,7 +1,24 @@
-data:
-  raw_true: "data/raw/True.csv"
-  raw_fake: "data/raw/Fake.csv"
+config.yaml:data:
+  raw_path: data/raw
+  processed_path: data/processed
+  split_ratio: 0.8
+
 models:
   decision_tree:
-    depth_range: [4, 6, 8, 10, 12]
+    depth_range: [ 4, 6, 8, 10, 12 ]
+  tfidf:
+    max_features: [ 1000, 3000, 5000 ]
+  bert:
+    model_name: distilroberta-base
+    max_tokens: 256
+    epochs: 3
+    learning_rate: 2e-5
+    fp16: true
+
+explainability:
+  shap:
+    global_sample_size: 500
+    stability_test_sample_size: 50
+    fidelity_sample_size: 256
+
 random_seed: 42
