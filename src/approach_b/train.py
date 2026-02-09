@@ -21,3 +21,13 @@ class BERTClassifier:
             return self.tokenizer(batch["text"], padding=True, truncation=True, max_length=max_length)
             
         return dataset.map(_tokenize, batched=True).remove_columns(["text"])
+
+    def _build_training_arguments(self):
+        from transformers import TrainingArguments
+        return TrainingArguments(
+            output_dir="./results",
+            num_train_epochs=3,
+            per_device_train_batch_size=8,
+            per_device_eval_batch_size=16,
+            evaluation_strategy="epoch"
+        )
