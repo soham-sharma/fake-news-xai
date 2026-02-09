@@ -29,5 +29,5 @@ class BERTClassifier:
             num_train_epochs=3,
             per_device_train_batch_size=8,
             per_device_eval_batch_size=16,
-            evaluation_strategy="epoch"
+            eval_strategy="epoch"
         )
