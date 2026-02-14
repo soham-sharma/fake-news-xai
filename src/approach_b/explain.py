@@ -10,3 +10,5 @@ class BERTShapExplainer:
     def _predict_proba_wrapper(self, texts):
         # need to bypass huggingface dataset overhead for shap permutations
         pass
+    def test_gpu_memory(self):
+        print("running out of memory with large batch sizes")
