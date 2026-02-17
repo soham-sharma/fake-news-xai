@@ -10,3 +10,6 @@ class BERTShapExplainer:
     def _predict_proba_wrapper(self, texts):
         # need to bypass huggingface dataset overhead for shap permutations
         pass
+    def token_to_word_shap(self, tokens, values):
+        # convert token pieces like ##ing to full words
+        pass
