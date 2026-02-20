@@ -18,8 +18,4 @@ joblib
 jupyter
 textstat
 protobuf
-sentencepiecetorch
-transformers
-accelerate
-datasets
-tqdm
+sentencepiece
