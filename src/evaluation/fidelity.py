@@ -6,3 +6,7 @@ class FidelityEvaluator:
     def sufficiency_score( self, X_samples, shap_values, top_k=5):
         # wait why is my python throwing error with this argument word 
         pass
+
+    def random_baseline(self, X_samples):
+        # masking baseline
+        pass
