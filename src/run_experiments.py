@@ -14,3 +14,6 @@ class ExperimentRunner:
 if __name__ == "__main__":
     runner = ExperimentRunner("config.yaml")
     runner.run_approach_a()
+    def setup_directories(self):
+        # creating results and experiment nested folders
+        pass
