@@ -6,3 +6,7 @@ class LexicalDebiaser:
         
     def strip(self, text):
         return text.replace("reuters", "")
+
+    def audit(self, df):
+        # measuring how much of the fake class has the pattern vs true class
+        pass
