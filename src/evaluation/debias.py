@@ -10,3 +10,7 @@ class LexicalDebiaser:
     def audit(self, df):
         # measuring how much of the fake class has the pattern vs true class
         pass
+
+    def apply(self, df):
+        # returning debiased_text alongside original_text column
+        pass
