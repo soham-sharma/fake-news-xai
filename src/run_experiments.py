@@ -21,3 +21,7 @@ if __name__ == "__main__":
     def run_debiasing(self):
         from src.evaluation.debias import LexicalDebiaser
         print("auditing datasets and regenerating test combinations")
+
+    def _snapshot_artifacts(self, artifact_paths):
+        # storing model objects internally 
+        pass
