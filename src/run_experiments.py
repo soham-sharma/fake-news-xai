@@ -17,3 +17,7 @@ if __name__ == "__main__":
     def setup_directories(self):
         # creating results and experiment nested folders
         pass
+
+    def run_debiasing(self):
+        from src.evaluation.debias import LexicalDebiaser
+        print("auditing datasets and regenerating test combinations")
