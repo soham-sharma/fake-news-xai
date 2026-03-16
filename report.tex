@@ -1,8 +1,1069 @@
 \documentclass[journal,10pt,twocolumn]{IEEEtran}
-\begin{document}
-\title{Fake News Detection}
-\maketitle
-\end{document}
+%\documentclass[letterpaper, 10pt, conference]{IEEEtran}
+% ── Packages ──────────────────────────────────────────────────────
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage[caption=false]{subfig}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{multirow}
+\usepackage{hyperref}
+\usepackage{cite}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{balance}
+\usepackage{url}
 
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  citecolor=black,
+  urlcolor=black
+}
+
+% ── Title block ──────────────────────────────────────────────────
+\title{White-Box vs.\ Black-Box Fake News Detection:\\
+  An Explainability Comparison Using SHAP}
+
+\author{%
+  \IEEEauthorblockN{Soham Sharma}\\
+  \IEEEauthorblockA{Department of Computer Science\\
+    Purdue University, West Lafayette, IN\\
+    \texttt{sharm710@purdue.edu}}
+}
+
+\markboth{CS 59200EAI: Appls Of ML And Explainable AI, Spring 2026}{}
+
+\begin{document}
+\maketitle
+
+% ── Abstract ────────────────────────────────────────────────────
+\begin{abstract}
+Automated fake news detection systems are deployed at scale, yet the
+internal logic of high-performing models is rarely examined.  This paper
+compares two fundamentally different classification architectures on the
+ISOT Fake News Dataset: a Decision Tree operating on TF-IDF features
+(Approach A, white-box) and a fine-tuned DistilRoBERTa transformer
+(Approach B, black-box).  SHapley Additive exPlanations (SHAP) are
+applied to both.  For the Decision Tree, SHAP values are computed
+exactly via \texttt{shap.TreeExplainer}; for DistilRoBERTa, a
+partition-based approximation over token coalitions is used.  We
+evaluate explanations across three dimensions: classification
+performance (H1), explanation stability measured over 50 near-duplicate
+article pairs (H2), and explanation fidelity measured via sufficiency
+and necessity masking at $k \in \{3,5,10\}$ (H3-fidelity).  A
+critical finding is that the ISOT dataset contains severe lexical
+leakage: the Reuters news agency dateline pattern \texttt{(Reuters)}
+appears in 21{,}256 articles with a 99.96\% label-skew toward the real
+class.  We introduce a lexical debiasing pass that strips 12 news
+agency patterns before training, producing parallel original and
+debiased experimental splits.  On the original split, the Decision Tree
+achieves F1\,=\,0.9963 and DistilRoBERTa achieves F1\,=\,0.9997.
+After debiasing, the Decision Tree drops to F1\,=\,0.9649 while
+DistilRoBERTa is essentially unchanged at F1\,=\,0.9996, confirming
+that the Decision Tree relied heavily on lexical shortcuts.
+Explanation stability (mean Pearson $r$) is significantly higher for
+the Decision Tree on the original split ($r=0.9999$, $p < 10^{-9}$)
+but the advantage disappears after debiasing ($p=0.101$), indicating
+the advantage was leakage-driven.  Decision Tree SHAP consistently
+achieves higher composite fidelity on both splits, a result that is
+partly structural: exact SHAP and decision tree predictions are two
+descriptions of the same computation.
+\end{abstract}
+
+% \begin{IEEEkeywords}
+% Explainable AI, Fake News Detection, SHAP, Decision Tree, BERT,
+% Transformer, Lexical Debiasing, Explanation Fidelity, Explanation
+% Stability, ISOT
+% \end{IEEEkeywords}
+
+% ── I. Introduction ─────────────────────────────────────────────
 \section{Introduction}
-Testing basic intro chapter text here.
+\label{sec:intro}
+
+Misinformation circulates on social media at a scale and speed that
+precludes manual review.  Studies have linked the spread of false
+content to measurable effects on electoral behavior~\cite{vosoughi2018spread},
+vaccine hesitancy~\cite{roozenbeek2020susceptibility}, and public health
+responses during disease outbreaks.  Automated classifiers trained on
+labeled datasets can flag content at inference time, but they are
+typically deployed as black boxes.  For content moderation, this creates
+two problems.  First, when a model makes an incorrect decision,
+moderators cannot audit the reasoning behind it.  Second, in several
+jurisdictions, automated decision systems that affect users carry
+disclosure requirements that black-box models cannot satisfy.
+
+Interpretable fake news detection is therefore not merely an academic
+target.  There is a practical need for models whose decision logic is
+auditable by non-technical reviewers, and whose explanations are
+reliable enough to be acted on.
+
+This paper addresses that need through a systematic comparison of a
+Decision Tree and a fine-tuned DistilRoBERTa transformer, both trained
+on the ISOT Fake News Dataset~\cite{ahmed2018detecting}.  SHAP is applied
+to both.  The comparison goes beyond classification metrics to examine
+the explanations themselves across three dimensions:
+
+\begin{itemize}
+  \item \textbf{Performance (H1):} Does DistilRoBERTa achieve higher
+        classification accuracy than the Decision Tree?
+  \item \textbf{Stability (H2):} Are Decision Tree SHAP explanations
+        more consistent across near-duplicate inputs than post-hoc
+        BERT SHAP explanations?
+  \item \textbf{Fidelity:} Do the SHAP explanations faithfully reflect
+        each model's actual decision logic, as measured by sufficiency
+        and necessity masking?
+\end{itemize}
+
+A key contribution is the identification and systematic treatment of
+lexical leakage in the ISOT dataset.  We show that the Reuters news
+agency byline, \texttt{(Reuters)}, is present in over 21{,}000 articles
+with a label skew exceeding 99.9 percentage points.  A model trained on
+this data learns source attribution, not misinformation detection.  We
+introduce a lexical debiasing step that removes 12 identified news
+agency patterns, produce parallel experimental splits, and train both
+models independently on each split.  All reported results compare
+original and debiased conditions.
+
+% ── II. Related Work ─────────────────────────────────────────────
+\section{Related Work}
+\label{sec:related}
+
+\subsection{Fake News Detection}
+The dominant approach to automated fake news detection has evolved from
+early bag-of-words classifiers~\cite{perez2018automatic} through
+shallow machine learning pipelines using TF-IDF representations and
+ensemble methods, to deep learning approaches using recurrent
+networks~\cite{ruchansky2017csi} and, more recently, pre-trained
+transformers.  Zhou and Zafarani~\cite{zhou2020survey} provide a
+comprehensive survey and note that reported accuracy figures are highly
+dataset-dependent, with results on biased benchmarks often
+overestimating real-world performance.  The ISOT dataset~\cite{ahmed2018detecting}
+is widely used but, as we demonstrate, contains a structural source
+attribution shortcut that inflates performance on all classifiers.
+
+\subsection{Explainability in NLP Classification}
+SHAP~\cite{lundberg2017unified} provides a game-theoretic framework for
+feature attribution grounded in Shapley values from cooperative game
+theory.  For tree-based models, \texttt{TreeExplainer}~\cite{lundberg2020local}
+computes exact Shapley values in polynomial time.  For neural models,
+approximation is required.  The \texttt{shap.Explainer} with a
+\texttt{Text} masker uses a partition-based algorithm that samples token
+coalitions and estimates the marginal contribution of each token by
+measuring how the model output changes when it is masked.
+
+LIME~\cite{ribeiro2016should} provides an alternative post-hoc
+explanation approach via local surrogate models.  Both SHAP and LIME
+have been criticized for instability: small input perturbations can
+produce large changes in attributions~\cite{alvarez2018robustness}.
+Yeh et al.~\cite{yeh2019fidelity} propose fidelity metrics based on
+sufficiency and necessity masking, which we adopt as a second evaluation
+axis alongside stability.
+
+\subsection{Dataset Bias and Leakage in NLP}
+Gururangan et al.~\cite{gururangan2018annotation} demonstrate that NLI
+datasets contain substantial annotation artifacts that allow shallow
+classifiers to perform near human-level without genuine language
+understanding.  Analogous source-attribution shortcuts have been
+documented in news classification datasets.  Our work extends this line
+of analysis to fake news detection, provides a systematic audit of
+leakage patterns, and quantifies the effect of lexical debiasing on
+both model accuracy and explanation quality.
+
+% ── III. Dataset ─────────────────────────────────────────────────
+\section{Dataset}
+\label{sec:dataset}
+
+\subsection{ISOT Fake News Dataset}
+The ISOT Fake News Dataset~\cite{ahmed2018detecting} contains 44{,}898
+English-language news articles, with 21{,}417 labeled real (class 0)
+and 23{,}481 labeled fake (class 1), yielding a 48\%/52\% class split.
+The real articles are sourced from the Reuters news agency wire
+service.  Fake articles were collected from sites flagged by PolitiFact
+and other fact-checkers, including InfoWars and similar fringe outlets.
+All articles include a title and body text, with an average combined
+length of 419 words.
+
+A stratified 80/20 split by label is applied using a fixed random seed
+(42), yielding 35{,}918 training articles and 8{,}980 test articles.
+The preprocessing pipeline lowercases all text, removes URLs and HTML
+tags, and collapses whitespace.
+
+\subsection{Exploratory Data Analysis}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{results/figures/eda_top_words_tfidf.png}
+\caption{Top TF-IDF features by class. The \texttt{reuters} token dominates the real class, revealing source-level lexical leakage.}
+\label{fig:eda_tfidf}
+\end{figure*}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.8\columnwidth]{results/figures/eda_class_balance.png}
+\caption{Class distribution of the ISOT dataset showing near-balanced real (21{,}417) and fake (23{,}481) articles.}
+\label{fig:eda_class}
+\end{figure}
+
+Fig.~\ref{fig:eda_tfidf} shows key exploratory statistics.  The
+most discriminative TF-IDF term by mean weight in the real class is
+\texttt{reuters}, which appears as a source byline rather than topical
+content.  The term \texttt{trump} is the top TF-IDF feature for both
+classes, reflecting the political domain of the dataset.  Sentiment
+polarity distributions are nearly identical across classes (mean
+polarity 0.054 real, 0.057 fake), confirming that sentiment alone is
+not a useful discriminator.  Flesch-Kincaid readability scores are
+slightly higher for real articles (mean grade 12.0 vs.\ 10.5), consistent
+with formal news agency writing conventions.  The
+\texttt{has\_author} feature is zero for 100\% of articles in both
+classes and provides no discriminative information.
+
+\subsection{Lexical Leakage Audit}
+\label{sec:leakage}
+
+Because all real articles derive from Reuters, any token identifying a
+Reuters article is a near-perfect proxy for the real label.  We audited
+12 regex patterns covering Reuters, AP, AFP, Bloomberg, and NYT bylines
+and datelines.  Table~\ref{tab:leakage} presents the five most biased
+patterns by absolute label gap.
+
+\begin{table}[h]
+\centering
+\caption{Top Leakage Patterns by Label Skew}
+\label{tab:leakage}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{lcrrr}
+\toprule
+\textbf{Pattern} & \textbf{Matches} & \textbf{Fake\%} & \textbf{Real\%} & \textbf{Gap} \\
+\midrule
+\texttt{reuters\_dateline\_dash}  & 15      &   0.0 & 100.0 & 100.0 \\
+\texttt{dash\_reuters}            & 11      &   0.0 & 100.0 & 100.0 \\
+\texttt{nyt\_parenthetical}       & 2       & 100.0 &   0.0 & 100.0 \\
+\texttt{bloomberg\_parenthetical} & 1       & 100.0 &   0.0 & 100.0 \\
+\texttt{reuters\_parenthetical}   & 21{,}256 &   0.0 &  99.9 &  99.9 \\
+\texttt{ap\_parenthetical}        & 33      &  97.0 &   3.0 &  93.9 \\
+\texttt{afp\_parenthetical}       & 9       &  88.9 &  11.1 &  77.8 \\
+\texttt{associated\_press}        & 375     &  76.3 &  23.7 &  52.5 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+The \texttt{reuters\_parenthetical} pattern \texttt{(Reuters)} is the
+most consequential: it appears in 21{,}256 articles (47.3\% of the
+full corpus), with 99.96\% of matched articles labeled real.  The
+absolute bias gap of 99.9 pp confirms that learning this token
+constitutes source attribution rather than misinformation detection.
+
+\subsection{Debiasing Procedure}
+
+The debiased split is produced by applying all 12 patterns as
+substitution regexes (case-insensitive), replacing matched substrings
+with whitespace before collapsing runs.  This is applied to training and
+test text independently.  Both models are then trained from scratch on the
+debiased training split and evaluated on the debiased test split.  The
+debiasing comparison in Table~\ref{tab:debias_compare} shows that the top
+Decision Tree feature shifts from \texttt{reuters} (importance 0.989)
+to \texttt{said} (importance 0.600) after debiasing.
+
+\begin{table}[h]
+\centering
+\caption{Top DT Feature Before and After Debiasing}
+\label{tab:debias_compare}
+\begin{tabular}{clclc}
+\toprule
+\textbf{Rank} & \textbf{Before} & \textbf{Imp.} & \textbf{After} & \textbf{Imp.} \\
+\midrule
+1 & \texttt{reuters}        & 0.989 & \texttt{said}    & 0.600 \\
+2 & \texttt{featured image} & 0.006 & \texttt{via}     & 0.250 \\
+3 & \texttt{century wire}   & 0.005 & \texttt{reuters} & 0.081 \\
+4 & \texttt{zika}           & 0.000 & \texttt{video}   & 0.069 \\
+5 & \texttt{the nov}        & 0.000 & \texttt{green}   & 0.000 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{results/figures/reuters_vanishing_act.png}
+\caption{Effect of lexical debiasing: the \texttt{reuters} token's importance drops from 0.989 to 0.081 after debiasing, demonstrating successful removal of the primary leakage signal.}
+\label{fig:reuters_vanishing}
+\end{figure*}
+
+% ── IV. Methods ──────────────────────────────────────────────────
+\section{Methods}
+\label{sec:methods}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{results/figures/system_architecture.png}
+\caption{System architecture of the experimental pipeline.  The ISOT dataset is processed through two parallel tracks (original and debiased).  Each track trains both a Decision Tree (Approach~A) and a DistilRoBERTa transformer (Approach~B), with SHAP explanations evaluated across three dimensions: classification performance (H1), explanation stability (H2), and explanation fidelity (H3).}
+\label{fig:system_architecture}
+\end{figure*}
+
+Fig.~\ref{fig:system_architecture} presents the end-to-end experimental
+pipeline.  Both approaches are trained on the original and debiased
+splits independently, producing four model--explainer configurations
+whose outputs are compared along the three hypothesis dimensions
+defined in Section~\ref{sec:intro}.
+
+\subsection{Approach A: Decision Tree with TF-IDF Features}
+\label{sec:approach_a}
+
+\subsubsection{Feature Engineering}
+Text features are extracted using TF-IDF vectorization over unigrams
+and bigrams with a vocabulary ceiling of 5{,}000 terms and sublinear TF
+scaling:
+\begin{equation}
+  \mathrm{tf\text{-}idf}(t,d)
+    = \mathrm{tf}(t,d) \cdot \log\!\left(\frac{N}{\mathrm{df}(t)}\right)
+  \label{eq:tfidf}
+\end{equation}
+where $N$ is the corpus size and $\mathrm{df}(t)$ is the number of
+documents containing term $t$.  Eight additional metadata features are
+appended: TextBlob sentiment polarity, TextBlob sentiment subjectivity,
+Flesch-Kincaid grade level (via \texttt{textstat}), word count,
+has-author binary flag, exclamation count, question mark count, and
+uppercase letter ratio.  The combined feature matrix has 5{,}008
+dimensions, stored as a sparse CSR matrix.
+
+\subsubsection{Model and Hyperparameter Search}
+A \texttt{DecisionTreeClassifier} with \texttt{class\_weight='balanced'}
+is trained across a depth grid $d \in \{4, 6, 8, 10, 12\}$ and split
+criteria \{gini, entropy\}, for ten configurations per split.
+Selection uses 5-fold stratified cross-validation scored by mean F1.
+An interpretability score is assigned to each configuration:
+\begin{equation}
+  I(T) = \frac{1}{\ln(L + 1)}
+  \label{eq:interp}
+\end{equation}
+where $L$ is the number of leaves in tree $T$.  As $L$ grows with
+depth, $I(T)$ decreases monotonically, providing a quantitative
+representation of the readability cost of increased complexity.
+
+\subsubsection{SHAP Computation}
+Exact Shapley values are computed using \texttt{shap.TreeExplainer}:
+\begin{equation}
+  \phi_i(f) = \sum_{S \subseteq F \setminus \{i\}}
+    \frac{|S|!\,(|F|-|S|-1)!}{|F|!}
+    \bigl[f(S \cup \{i\}) - f(S)\bigr]
+  \label{eq:shapley}
+\end{equation}
+where $F$ is the full feature set and $f(S)$ is the model output when
+only features in $S$ are active.  For a decision tree, this can be
+computed exactly in polynomial time by path enumeration, avoiding the
+sampling approximation required by neural approaches.  Global importance
+is computed as mean $|\phi_i|$ over all test samples.
+
+\subsection{Approach B: DistilRoBERTa}
+\label{sec:approach_b}
+
+\subsubsection{Architecture and Training}
+\texttt{distilroberta-base} is loaded from HuggingFace with an added
+two-class sequence classification head.  Articles are tokenized with
+the model's byte-pair encoding tokenizer, truncated to 256 tokens.
+Fine-tuning uses the HuggingFace \texttt{Trainer} API with the
+following hyperparameters: 3 epochs, learning rate $2 \times 10^{-5}$,
+per-device batch size 32, mixed-precision training (fp16), best
+checkpoint selection by validation F1.  A 10\% stratified validation
+hold-out from the training split is used for checkpoint selection.
+Training losses converge from 0.015 (epoch 1) to 0.002 (epoch 2) to
+0.0002 (epoch 3).
+
+\subsubsection{SHAP Computation}
+Post-hoc SHAP explanations are computed using \texttt{shap.Explainer}
+with a \texttt{shap.maskers.Text} masker, which replaces selected tokens
+with the tokenizer's mask token and evaluates the model on different
+coalitions.  The partition-based algorithm estimates~\eqref{eq:shapley}
+by sampling rather than exact enumeration.  Token-level SHAP values are
+aggregated to word level by summing contributions of subword pieces that
+constitute the same word.  Global importance is computed as mean
+$|\phi_i|$ over 500 randomly sampled test articles (runtime constraint:
+approximately 14 hours on a single GPU for 500 examples).
+
+\subsection{Evaluation Framework}
+\label{sec:eval}
+
+\subsubsection{Classification Metrics}
+Standard binary classification metrics are reported: accuracy,
+precision, recall, F1 (macro binary), and AUC-ROC.  All metrics are
+computed on the held-out test split (8{,}980 articles).
+
+\subsubsection{Explanation Stability}
+Stability measures whether an explanation is consistent across
+semantically similar inputs.  We generate 50 near-duplicate article
+pairs from the test set using three perturbation strategies: (i)
+synonym substitution via WordNet~\cite{miller1995wordnet}, replacing
+2--3 content words per article; (ii) sentence reordering of all
+non-first sentences; and (iii) minor lexical substitution (e.g.,
+\emph{says} $\to$ \emph{stated}).  Only pairs with TF-IDF cosine
+similarity $\geq 0.70$ between original and variant are retained.
+
+For each pair $(x_1, x_2)$, SHAP importance vectors $\phi(x_1)$ and
+$\phi(x_2)$ are computed and their Pearson correlation is measured:
+\begin{equation}
+  \mathrm{Stab}(f, x_1, x_2)
+    = r\!\left(\phi(x_1),\, \phi(x_2)\right)
+  \label{eq:stability}
+\end{equation}
+The H2 test is a paired two-tailed $t$-test comparing the 50
+per-pair stability scores from the Decision Tree against the 50
+scores from DistilRoBERTa, on the same pairs.
+
+\subsubsection{Explanation Fidelity}
+Following Yeh et al.~\cite{yeh2019fidelity}, we measure fidelity through
+sufficiency and necessity masking at $k \in \{3, 5, 10\}$.
+
+\textbf{Sufficiency} ($\mathrm{Suff}_k$): the top-$k$ SHAP features
+are retained; all others are zeroed (tabular) or replaced with the PAD
+token (text).  Sufficiency is the fraction of predictions unchanged:
+\begin{equation}
+  \mathrm{Suff}_k
+    = \frac{1}{n}\sum_{i=1}^{n}
+      \mathbf{1}\!\left[\hat{f}\!\left(\mathrm{keep}_k(x_i)\right)
+        = \hat{f}(x_i)\right]
+  \label{eq:sufficiency}
+\end{equation}
+
+\textbf{Necessity} ($\mathrm{Nec}_k$): the top-$k$ SHAP features are
+removed; all others are retained.  Necessity is the fraction of
+predictions that change:
+\begin{equation}
+  \mathrm{Nec}_k
+    = \frac{1}{n}\sum_{i=1}^{n}
+      \mathbf{1}\!\left[\hat{f}\!\left(\mathrm{drop}_k(x_i)\right)
+        \neq \hat{f}(x_i)\right]
+  \label{eq:necessity}
+\end{equation}
+
+\textbf{Composite fidelity} combines both:
+\begin{equation}
+  F_k = \frac{\mathrm{Suff}_k + \mathrm{Nec}_k}{2}
+  \label{eq:fidelity}
+\end{equation}
+
+A random baseline is computed by repeating the sufficiency and
+necessity tests with $k$ features selected uniformly at random, averaged
+over 10 trials.  A faithful explanation must substantially exceed this
+baseline.
+
+% ── V. Results ──────────────────────────────────────────────────
+\section{Results}
+\label{sec:results}
+
+\subsection{H1: Classification Performance}
+\label{sec:results_h1}
+
+Table~\ref{tab:accuracy} summarizes classification performance on both
+splits.
+
+\begin{table}[h]
+\centering
+\caption{Classification Performance on Test Set (8{,}980 articles)}
+\label{tab:accuracy}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{llccccc}
+\toprule
+\textbf{Split} & \textbf{Model} & \textbf{Acc.} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1} & \textbf{AUC} \\
+\midrule
+\multirow{2}{*}{Original}
+  & Decision Tree   & 0.9961 & 0.9964 & 0.9962 & 0.9963 & 0.9962 \\
+  & DistilRoBERTa   & 0.9997 & 0.9998 & 0.9996 & 0.9997 & 1.0000 \\
+\midrule
+\multirow{2}{*}{Debiased}
+  & Decision Tree   & 0.9635 & 0.9689 & 0.9610 & 0.9649 & 0.9800 \\
+  & DistilRoBERTa   & 0.9996 & 0.9996 & 0.9996 & 0.9996 & 1.0000 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+On the original split, DistilRoBERTa achieves F1\,=\,0.9997 compared to
+the Decision Tree's F1\,=\,0.9963, a gap of 0.0034.  H1 is supported.
+However, both values exceed 0.996, indicating that both models have
+largely converged on the leakage signal.
+
+After debiasing, the Decision Tree drops by 3.14 pp to F1\,=\,0.9649.
+DistilRoBERTa drops by less than 0.01 pp to F1\,=\,0.9996.  The gap
+grows to 0.0361.  This asymmetric response confirms that the Decision
+Tree's original performance relied substantially on the Reuters source
+token, while DistilRoBERTa's contextual representations generalize past
+the removal of the dateline.  H1 is supported more meaningfully on the
+debiased split.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\columnwidth]{results/figures/accuracy_comparison_debiased.png}
+\caption{Classification performance comparison on the debiased split. The Decision Tree's accuracy drops 3.14 pp after removing the Reuters byline, while DistilRoBERTa is essentially unaffected.}
+\label{fig:accuracy_comparison}
+\end{figure}
+
+\subsection{Depth vs.\ Interpretability Tradeoff}
+\label{sec:results_depth}
+
+Table~\ref{tab:depth} reports cross-validated F1 and interpretability
+scores across the depth sweep for both splits.
+
+\begin{table}[h]
+\centering
+\caption{Decision Tree Depth Sweep Results}
+\label{tab:depth}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{clcccc}
+\toprule
+\textbf{Split} & \textbf{Depth} & \textbf{Criterion} & \textbf{CV F1} & \textbf{CV F1 Std} & \textbf{$I(T)$} \\
+\midrule
+\multirow{5}{*}{Original}
+  & 4  & gini    & 0.9961 & 0.0007 & 0.353 \\
+  & 6  & entropy & 0.9963 & 0.0008 & 0.240 \\
+  & 8  & gini    & 0.9964 & 0.0006 & 0.180 \\
+  & 10 & entropy & 0.9964 & 0.0011 & 0.144 \\
+  & 12 & gini    & 0.9964 & 0.0006 & 0.120 \\
+\midrule
+\multirow{5}{*}{Debiased}
+  & 4  & gini    & 0.9169 & 0.0025 & 0.353 \\
+  & 6  & gini    & 0.9362 & 0.0007 & 0.240 \\
+  & 8  & entropy & 0.9504 & 0.0019 & 0.180 \\
+  & 10 & entropy & 0.9590 & 0.0021 & 0.144 \\
+  & 12 & entropy & 0.9637 & 0.0026 & 0.120 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+On the original split, the CV F1 curve is essentially flat across all
+depths (range 0.0003).  The leakage signal is so dominant that tree
+depth has negligible effect: the model finds the \texttt{reuters} split
+node early in every path.  On the debiased split, the tradeoff is real:
+depth 4 yields CV F1\,=\,0.917 with interpretability score 0.353, while
+depth 12 yields CV F1\,=\,0.964 with $I(T)=0.120$.  A depth of 8--10
+offers a reasonable balance, capturing most of the accuracy gain (CV
+F1\,=\,0.950--0.959) while retaining a higher interpretability score
+(0.144--0.180).
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{results/figures/dt_depth_tradeoff_debiased.png}
+\caption{Decision Tree depth vs.\ cross-validated F1 on the debiased split. The clear monotonic tradeoff between accuracy and interpretability emerges only after the leakage signal is removed.  Depth 8--10 offers a practical balance point.}
+\label{fig:depth_tradeoff}
+\end{figure}
+
+\subsection{Global SHAP Feature Importance}
+\label{sec:results_shap}
+
+Table~\ref{tab:shap_top10} lists the top-10 features by mean $|\phi_i|$
+for each model and split.
+
+\begin{table}[h]
+\centering
+\caption{Top-10 SHAP Features / Tokens by Approach and Split}
+\label{tab:shap_top10}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{clclcl}
+\toprule
+ & \multicolumn{2}{c}{\textbf{DT Original}} & \multicolumn{2}{c}{\textbf{DT Debiased}} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+\textbf{Rank} & \textbf{Feature} & $\bar{|\phi|}$ & \textbf{Feature} & $\bar{|\phi|}$ \\
+\midrule
+1  & \texttt{reuters}        & 0.404 & \texttt{said}         & 0.176 \\
+2  & \texttt{featured image} & 0.028 & \texttt{via}          & 0.123 \\
+3  & \texttt{via}            & 0.016 & \texttt{video}        & 0.085 \\
+4  & \texttt{getty images}   & 0.012 & \texttt{question\_ct} & 0.051 \\
+5  & \texttt{image}          & 0.012 & \texttt{excl.\_ct}    & 0.035 \\
+6  & \texttt{read more}      & 0.011 & \texttt{reuters}      & 0.031 \\
+7  & \texttt{century wire}   & 0.008 & \texttt{read more}    & 0.020 \\
+8  & \texttt{question\_ct}   & 0.005 & \texttt{said on}      & 0.019 \\
+9  & \texttt{video}          & 0.004 & \texttt{featured}     & 0.015 \\
+10 & \texttt{said}           & 0.003 & \texttt{feat.\ image} & 0.014 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+On the original split, \texttt{reuters} dominates with a mean $|\phi|$
+of 0.404, approximately 14$\times$ the next most important feature
+(\texttt{featured image} at 0.028).  After debiasing, \texttt{reuters}
+drops to rank 6 with $\bar{|\phi|}=0.031$.  The top three features become
+\texttt{said} (reporting verb frequency), \texttt{via} (social sharing
+patterns), and \texttt{video} (media type indicator), which represent
+writing-style signals rather than source identity.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.85\textwidth]{results/figures/shap_comparison_debiased.png}
+\caption{Top-20 global SHAP features for Decision Tree (left) and DistilRoBERTa (right) on the debiased split. The DT relies on interpretable writing-style features while DistilRoBERTa attends to subword fragments.}
+\label{fig:shap_comparison}
+\end{figure*}
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{results/figures/dt_shap_global_beeswarm_debiased.png}
+\caption{SHAP beeswarm plot for the Decision Tree on the debiased split.  Each dot represents a single sample's SHAP value for a given feature.  Feature values (color) reveal that high \texttt{said} TF-IDF scores push predictions toward the real class.}
+\label{fig:dt_beeswarm}
+\end{figure}
+
+The DistilRoBERTa top tokens are dominated by subword fragments from the
+byte-pair encoding tokenizer.  On the original split, \texttt{uters}
+(0.272) and \texttt{re} (0.152) are the top two tokens; these
+reconstruct \texttt{reuters} at the subword level, confirming that
+DistilRoBERTa also attends to the source attribution signal.  After
+debiasing, the top tokens shift to geographic and proper-noun fragments
+(\texttt{sels}, \texttt{oenix}, \texttt{ington}), reflecting
+DistilRoBERTa's attention to entity-level context.
+
+\subsubsection{Decision Rules}
+The white-box nature of the Decision Tree allows direct rule extraction.
+On the original split, the first split at every path root is:
+\begin{displaymath}
+  \mathtt{reuters} > 0.010261 \Rightarrow \text{class} = 0,\ p = 1.00
+\end{displaymath}
+The tree is organized entirely around this one check.  On the debiased
+split, the top rule reads:
+\begin{displaymath}
+  \mathtt{said} \leq 0.0316,\;
+  \mathtt{video} \leq 0.0151,\;
+  \mathtt{via} \leq 0.0039,\;\ldots
+\end{displaymath}
+These rules correspond to a writing-style fingerprint: low reporting-verb
+frequency, absence of video references, and limited social-sharing
+patterns are characteristic of real news in the debiased split.  Such
+rules are directly auditable by a content moderator without NLP expertise.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{results/figures/dt_shap_local_waterfall_debiased.png}
+\caption{SHAP waterfall plot for a single prediction on the debiased split.  Individual feature contributions are decomposed from the base value (prior probability) to the final prediction, demonstrating the Decision Tree's fully transparent reasoning process.}
+\label{fig:waterfall}
+\end{figure}
+
+\subsection{H2: Explanation Stability}
+\label{sec:results_stability}
+
+Table~\ref{tab:stability} reports stability results across both splits.
+The 50 near-duplicate pairs have mean TF-IDF cosine similarity of 0.952
+(original) and 0.948 (debiased), confirming high semantic proximity.
+
+\begin{table}[h]
+\centering
+\caption{Explanation Stability Results (50 near-duplicate pairs)}
+\label{tab:stability}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Split} & \textbf{Model} & \textbf{Mean $r$} & \textbf{Std $r$} & \textbf{$t$-stat} & \textbf{$p$-value} \\
+\midrule
+\multirow{2}{*}{Original}
+  & Decision Tree   & 0.9999 & 0.0000 & \multirow{2}{*}{7.59} & \multirow{2}{*}{$8.1 \times 10^{-10}$} \\
+  & DistilRoBERTa   & 0.7611 & 0.2202 & & \\
+\midrule
+\multirow{2}{*}{Debiased}
+  & Decision Tree   & 0.8735 & 0.3195 & \multirow{2}{*}{1.67} & \multirow{2}{*}{0.101} \\
+  & DistilRoBERTa   & 0.7791 & 0.1772 & & \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+On the original split, the Decision Tree achieves near-perfect stability
+($r = 0.9999$, $\mathrm{std} = 4.3 \times 10^{-5}$) while
+DistilRoBERTa shows substantial variation ($r = 0.761$,
+$\mathrm{std} = 0.220$).  The paired $t$-test gives $t = 7.59$,
+$p < 10^{-9}$.  H2 is strongly supported on the original split.
+
+However, this result requires qualification.  The Decision Tree's
+near-perfect stability is mechanistically explained by the leakage: both
+the original and variant article either contain or do not contain the
+\texttt{(Reuters)} token.  If they do, both traverse the same top-level
+branch and produce identical SHAP values.  If neither does, the model
+falls back to secondary features that are only minimally altered by
+synonym substitution.  In either case, the SHAP vectors are effectively
+identical, producing $r \approx 1$.
+
+After debiasing, this mechanism is removed.  The Decision Tree's mean
+stability drops to $r = 0.874$ ($\mathrm{std} = 0.320$), while
+DistilRoBERTa's stability is $r = 0.779$ ($\mathrm{std} = 0.177$).  The
+$t$-test gives $p = 0.101$.  H2 is rejected on the debiased split: there
+is no statistically significant stability difference between approaches.
+
+The practical interpretation is that DT explanations are \emph{genuinely}
+more stable than BERT explanations by a moderate margin (0.087
+difference in mean $r$) after debiasing, but this difference does not
+reach statistical significance at the 0.05 level with 50 pairs.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\columnwidth]{results/figures/stability_comparison_debiased.png}
+\caption{Explanation stability comparison on the debiased split.  While DT explanations show higher mean Pearson $r$, the difference is not statistically significant ($p = 0.101$) after removing the leakage signal.}
+\label{fig:stability}
+\end{figure}
+
+\subsection{Explanation Fidelity}
+\label{sec:results_fidelity}
+
+Table~\ref{tab:fidelity} reports sufficiency, necessity, and composite
+fidelity for both models and splits at $k \in \{3, 5, 10\}$.
+
+\begin{table*}[t]
+\centering
+\caption{Explanation Fidelity Results ($F_k$, Sufficiency, Necessity) at Top-$k$ Features}
+\label{tab:fidelity}
+\begin{tabular}{llccccccccc}
+\toprule
+ & & \multicolumn{4}{c}{\textbf{Decision Tree}} & \multicolumn{4}{c}{\textbf{DistilRoBERTa}} & \\
+\cmidrule(lr){3-6}\cmidrule(lr){7-10}
+\textbf{Split} & \textbf{$k$} & Suff. & Rand.\ Suff. & Nec. & $F_k$ & Suff. & Rand.\ Suff. & Nec. & $F_k$ & $\Delta F_k$ \\
+\midrule
+\multirow{3}{*}{Original}
+  & 3  & 1.000 & 0.527 & 0.473 & 0.736 & 0.566 & 0.555 & 0.000 & 0.283 & $-0.453$ \\
+  & 5  & 1.000 & 0.528 & 0.473 & 0.736 & 0.668 & 0.582 & 0.000 & 0.334 & $-0.402$ \\
+  & 10 & 1.000 & 0.529 & 0.473 & 0.736 & 0.848 & 0.642 & 0.000 & 0.424 & $-0.313$ \\
+\midrule
+\multirow{3}{*}{Debiased}
+  & 3  & 0.926 & 0.500 & 0.195 & 0.561 & 0.523 & 0.523 & 0.000 & 0.262 & $-0.299$ \\
+  & 5  & 0.941 & 0.502 & 0.258 & 0.600 & 0.535 & 0.523 & 0.000 & 0.268 & $-0.332$ \\
+  & 10 & 0.988 & 0.500 & 0.379 & 0.684 & 0.598 & 0.531 & 0.000 & 0.299 & $-0.385$ \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+Several findings emerge from Table~\ref{tab:fidelity}.
+
+\paragraph{DT Sufficiency = 1.000 on Original Split}
+The Decision Tree achieves perfect sufficiency at all $k$ values on the
+original split.  This is expected from the mathematical structure: for a
+decision tree with exact SHAP, the top-$k$ SHAP features by magnitude
+are precisely the features used on the traversed path.  Masking all
+other features and re-running the model on this path produces an
+identical prediction.  This is not a claim about model quality; it is a
+consequence of the TreeExplainer computation being exact.
+
+\paragraph{BERT Necessity = 0.000}
+DistilRoBERTa exhibits zero necessity at $k = 3$ and $k = 5$ on the
+original split, meaning that removing the top SHAP tokens changes
+essentially no predictions.  This is a serious fidelity failure: the
+tokens the explanation identifies as most important are not actually
+necessary for the model's decision.  This outcome reflects the
+approximation quality of the partition-based SHAP sampler and the fact
+that DistilRoBERTa can redistribute attention across many tokens.
+
+\paragraph{Fidelity Gap Persists After Debiasing}
+On the debiased split, DT sufficiency at $k=3$ drops to 0.926 (no
+longer guaranteed by exact SHAP alone), and necessity rises to 0.195.
+BERT sufficiency at $k=3$ is 0.523 (near the random baseline of 0.523),
+and necessity is 0.000.  The composite fidelity gap at $k=3$ is
+$\Delta F_k = -0.299$, smaller than on the original split ($-0.453$)
+but still substantial.  Decision Tree SHAP is more faithful on all six
+(split, $k$) configurations tested.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=\columnwidth]{results/figures/fidelity_decay_curve.png}
+\caption{Fidelity decay curves showing sufficiency and necessity scores as a function of top-$k$ features.  DT explanations consistently outperform DistilRoBERTa across all $k$ values, with the gap widening at smaller $k$.}
+\label{fig:fidelity}
+\end{figure}
+
+\subsection{Feature Overlap}
+\label{sec:results_overlap}
+
+The Jaccard similarity between the top-20 DT features and the top-20
+DistilRoBERTa tokens is 0.000 on both splits.  No features overlap.
+This is primarily a consequence of incompatible feature representations:
+the Decision Tree operates on whole-word TF-IDF tokens while
+DistilRoBERTa's tokenizer produces subword byte-pair encoding fragments.
+For example, the DT feature \texttt{reuters} appears as the subword
+fragments \texttt{uters} and \texttt{re} in the DistilRoBERTa token
+vocabulary.  Cross-model explanation comparison would require alignment
+at the concept level rather than the string level.
+
+\begin{figure}[h]
+\centering
+\includegraphics[width=0.9\columnwidth]{results/figures/feature_overlap_debiased.png}
+\caption{Feature overlap analysis between DT and DistilRoBERTa top-20 features on the debiased split.  The Jaccard similarity of 0.000 reflects the fundamental incompatibility of whole-word TF-IDF features and BPE subword tokens.}
+\label{fig:overlap}
+\end{figure}
+
+% ── VI. Discussion ───────────────────────────────────────────────
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{The Role of Lexical Leakage}
+
+The ISOT dataset provides a case study in how structural dataset
+artifacts can render standard evaluation metrics meaningless.  A
+Decision Tree with depth 4 achieves F1\,=\,0.9961 on the original
+split, which would appear to be a strong result.  However, the dominant
+rule is \texttt{reuters > 0.010}, and the model is effectively a
+news agency detector.  Without debiasing, the experiment measures
+source attribution, not misinformation detection.
+
+This problem is not unique to ISOT.  Any dataset where the real and
+fake classes are drawn from systematically different sources will exhibit
+analogous leakage.  Our lexical audit framework (Section~\ref{sec:leakage})
+generalizes directly to other datasets: enumerate candidate source
+patterns, measure label skew per pattern, and treat patterns with bias
+gaps exceeding a threshold (e.g., 80\%) as candidates for removal.
+
+\subsection{Interpretability vs.\ Performance on Debiased Data}
+
+The debiased depth sweep reveals a practically meaningful
+accuracy-interpretability tradeoff.  A depth-4 tree (16 leaves,
+$I(T) = 0.353$) achieves F1\,=\,0.917.  A depth-12 tree (4{,}096
+leaves, $I(T) = 0.120$) achieves F1\,=\,0.964.  The 4.7 pp accuracy
+cost of choosing the readable model is a concrete, quantifiable price of
+interpretability that can inform deployment decisions.
+
+In applications where rule auditability is required -- for example,
+where flagged content must be accompanied by an auditable decision
+trace -- a depth-8 or depth-10 tree offers a reasonable compromise:
+CV F1 in the range 0.950--0.959, interpretability score 0.144--0.180,
+and decision rules that can be printed on a single page.
+
+\subsection{Exact vs.\ Approximate SHAP}
+
+A recurring theme in the results is that the Decision Tree benefits from
+exact SHAP in ways that cannot be replicated for neural models.
+Sufficiency of 1.000 is guaranteed by the TreeExplainer construction.
+Near-perfect stability on the original split is a mathematical
+consequence of the deterministic decision path, not a property of the
+explanation being insightful.
+
+This asymmetry should caution against direct comparison of SHAP metrics
+across the two approaches.  The fidelity gap ($\Delta F_k$) is real and
+practically significant, but it conflates two distinct effects: (1) the
+inherent faithfulness advantage of exact over approximate SHAP, and (2)
+any genuine difference in how well the two models' predictions can be
+explained by a small set of features.  Disentangling these effects would
+require a neural model for which exact SHAP is tractable, which is not
+the case for transformer-scale architectures.
+
+\subsection{BERT Explanations on the Debiased Split}
+
+After debiasing, the top DistilRoBERTa tokens are geographic and
+proper-noun fragments (\texttt{sels}, \texttt{oenix}, \texttt{ington},
+\texttt{umbai}, \texttt{ington}).  These reconstruct city names
+(Brussels, Phoenix, Washington, Mumbai).  The SHAP values suggest that
+DistilRoBERTa is attending to the geographic context of articles to
+distinguish real from fake news.  Real news tends to report on
+international events involving specific cities and institutions; the
+model's attention to named entities is a plausible content signal.
+
+However, BERT necessity remains at 0.000 even after debiasing, meaning
+that masking these tokens does not change predictions.  DistilRoBERTa
+has distributed its decision over many tokens, and no small set is
+individually necessary.  This property of distributed attention is
+fundamental to transformer architecture and cannot be easily addressed
+by improving the SHAP approximation quality.
+
+\subsection{Practical Implications}
+
+For practitioners choosing between a Decision Tree and a transformer for
+fake news detection on a dataset with the ISOT structure, several
+considerations apply:
+
+\begin{itemize}
+  \item \textbf{Accuracy:} DistilRoBERTa achieves a 3.6 pp F1 advantage
+        after debiasing.  If maximizing classification performance is the
+        only objective, the transformer is superior.
+  \item \textbf{Auditability:} The Decision Tree's IF-THEN rules are
+        directly readable and verifiable.  DistilRoBERTa provides only
+        post-hoc token attributions, which require domain expertise to
+        interpret and cannot be traced to a logical path.
+  \item \textbf{Explanation reliability:} Decision Tree SHAP values are
+        exact.  DistilRoBERTa SHAP values are approximated, and the
+        approximation quality as measured by fidelity is substantially
+        lower.  Practitioners relying on SHAP attributions to audit
+        specific predictions should be aware of this gap.
+  \item \textbf{Computational cost:} BERT SHAP requires approximately
+        14 hours on a single GPU for 500 test examples.  Decision Tree
+        SHAP is computed in seconds for the full test set of 8{,}980
+        examples.
+\end{itemize}
+
+% ── VII. Limitations ─────────────────────────────────────────────
+\section{Limitations}
+\label{sec:limitations}
+
+\paragraph{Dataset Scope}
+All results are specific to the ISOT dataset with its Reuters-sourced
+real-news subset.  Conclusions about the relative interpretability and
+accuracy of the two approaches may not generalize to datasets with
+different source structures, language styles, or class definitions.
+
+\paragraph{Incomplete Debiasing}
+Lexical stripping removes byline tokens but does not eliminate the
+Reuters writing style (formal sentence structure, inverted pyramid
+organization, specific citation conventions).  A model trained on
+debiased ISOT may still partly exploit residual stylistic features.
+More thorough debiasing would require source-style normalization or
+domain-adversarial training.
+
+\paragraph{BERT SHAP Approximation}
+The partition-based SHAP approximation has known convergence issues for
+long texts.  With a global sample size of 500 articles and token budgets
+truncated to 256, the approximation may not have converged.  Larger
+sample sizes were computationally infeasible within the project scope.
+
+\paragraph{Fidelity Masking for Text}
+PAD-token replacement is an imperfect ablation for transformer models.
+The model's attention mechanism can infer positional structure from the
+pattern of non-masked tokens, which may prevent the model from
+disattending to removed information as cleanly as the feature-zeroing
+operation does for the Decision Tree.
+
+\paragraph{Synthetic Near-Duplicates}
+The stability evaluation pairs were generated synthetically via synonym
+substitution and sentence reordering.  These operations approximate
+paraphrase robustness but differ from true independent rewrites by
+different authors.  The TF-IDF similarity threshold of 0.70 ensures
+lexical proximity but does not guarantee semantic equivalence.
+
+% ── VIII. Conclusion ─────────────────────────────────────────────
+\section{Conclusion}
+\label{sec:conclusion}
+
+This paper presented a systematic comparison of a Decision Tree and
+DistilRoBERTa for fake news detection, evaluated across classification
+performance, explanation stability, and explanation fidelity, with and
+without a lexical debiasing pass applied to the ISOT dataset.
+
+The key findings are as follows.  First, the ISOT dataset contains
+severe lexical leakage through the Reuters news agency byline pattern,
+which appears in 47\% of the corpus with a 99.9 pp label skew toward
+the real class.  Without debiasing, published performance figures on
+this dataset measure source attribution rather than misinformation
+detection.  Second, after debiasing, DistilRoBERTa achieves a 3.6 pp F1
+advantage over the Decision Tree (H1 supported), and the interpretability-
+accuracy tradeoff for the Decision Tree is quantifiable at 4.7 pp F1
+between depth 4 and depth 12.  Third, the Decision Tree's near-perfect
+explanation stability on the original split ($r = 0.9999$) is a
+leakage artifact; after debiasing, the stability advantage disappears
+($p = 0.101$, H2 rejected).  Fourth, Decision Tree SHAP is consistently
+more faithful across all tested configurations, but this result is partly
+structural: exact SHAP and decision tree predictions are two
+representations of the same computation.  DistilRoBERTa SHAP exhibits
+near-zero necessity across all configurations, indicating that the
+approximated explanation fails to identify features that are genuinely
+required for the model's predictions.
+
+These findings argue for caution in interpreting reported accuracy figures
+on leakage-prone datasets, and for including explanation fidelity as a
+standard evaluation dimension alongside accuracy and stability when
+selecting models for high-stakes content moderation applications.
+
+% ── References ──────────────────────────────────────────────────
+\balance
+\bibliographystyle{IEEEtran}
+\begin{thebibliography}{20}
+
+\bibitem{ahmed2018detecting}
+H.~Ahmed, I.~Traore, and S.~Saad,
+``Detecting opinion spams and fake news using text classification,''
+\emph{Security and Privacy}, vol.~1, no.~1, p.~e9, 2018.
+
+\bibitem{vosoughi2018spread}
+S.~Vosoughi, D.~Roy, and S.~Aral,
+``The spread of true and false news online,''
+\emph{Science}, vol.~359, no.~6380, pp.~1146--1151, 2018.
+
+\bibitem{roozenbeek2020susceptibility}
+J.~Roozenbeek, C.~Schneider, S.~Dryhurst, J.~Kerr, A.~Freeman,
+G.~Recchia, A.~van~der~Bles, and S.~van~der~Linden,
+``Susceptibility to misinformation about COVID-19 around the world,''
+\emph{Royal Society Open Science}, vol.~7, no.~10, p.~201199, 2020.
+
+\bibitem{lundberg2017unified}
+S.~M.~Lundberg and S.-I.~Lee,
+``A unified approach to interpreting model predictions,''
+in \emph{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~30, 2017.
+
+\bibitem{lundberg2020local}
+S.~M.~Lundberg, G.~Erion, H.~Chen, A.~DeGrave, J.~M.~Prutkin, B.~Nair,
+R.~Katz, J.~Himmelfarb, N.~Bansal, and S.-I.~Lee,
+``From local explanations to global understanding with explainable {AI}
+for trees,''
+\emph{Nature Machine Intelligence}, vol.~2, no.~1, pp.~56--67, 2020.
+
+\bibitem{ribeiro2016should}
+M.~T.~Ribeiro, S.~Singh, and C.~Guestrin,
+``{`Why should I trust you?'}: Explaining the predictions of any
+classifier,''
+in \emph{Proc.\ 22nd ACM SIGKDD International Conference on Knowledge
+Discovery and Data Mining (KDD)}, pp.~1135--1144, 2016.
+
+\bibitem{yeh2019fidelity}
+C.-K.~Yeh, C.-Y.~Hsieh, A.~Suggala, D.~I.~Inouye, and
+P.~K.~Ravikumar,
+``On the (in)fidelity and sensitivity of explanations,''
+in \emph{Advances in Neural Information Processing Systems (NeurIPS)},
+vol.~32, 2019.
+
+\bibitem{alvarez2018robustness}
+M.~Alvarez-Melis and T.~S.~Jaakkola,
+``On the robustness of interpretability methods,''
+\emph{arXiv preprint arXiv:1806.08049}, 2018.
+
+\bibitem{gururangan2018annotation}
+S.~Gururangan, S.~Swayamdipta, O.~Levy, R.~Schwartz, S.~Bowman, and
+N.~A.~Smith,
+``Annotation artifacts in natural language inference data,''
+in \emph{Proc.\ Conference of the North American Chapter of the
+Association for Computational Linguistics (NAACL)}, pp.~107--112, 2018.
+
+\bibitem{zhou2020survey}
+X.~Zhou and R.~Zafarani,
+``A survey of fake news: Fundamental theories, detection methods, and
+opportunities,''
+\emph{ACM Computing Surveys}, vol.~53, no.~5, pp.~1--40, 2020.
+
+\bibitem{liu2019roberta}
+Y.~Liu, M.~Ott, N.~Goyal, J.~Du, M.~Joshi, D.~Chen, O.~Levy,
+M.~Lewis, L.~Zettlemoyer, and V.~Stoyanov,
+``{RoBERTa}: A robustly optimized {BERT} pretraining approach,''
+\emph{arXiv preprint arXiv:1907.11692}, 2019.
+
+\bibitem{sanh2019distilbert}
+V.~Sanh, L.~Debut, J.~Chaumond, and T.~Wolf,
+``{DistilBERT}, a distilled version of {BERT}: smaller, faster, cheaper
+and lighter,''
+\emph{arXiv preprint arXiv:1910.01108}, 2019.
+
+\bibitem{devlin2019bert}
+J.~Devlin, M.-W.~Chang, K.~Lee, and K.~Toutanova,
+``{BERT}: Pre-training of deep bidirectional transformers for language
+understanding,''
+in \emph{Proc.\ NAACL}, pp.~4171--4186, 2019.
+
+\bibitem{perez2018automatic}
+M.~E.~P{\'e}rez-Rosas, B.~Kleinberg, A.~Lefevre, and R.~Mihalcea,
+``Automatic detection of fake news,''
+in \emph{Proc.\ 27th International Conference on Computational
+Linguistics (COLING)}, pp.~3391--3401, 2018.
+
+\bibitem{ruchansky2017csi}
+N.~Ruchansky, S.~Seo, and Y.~Liu,
+``{CSI}: A hybrid deep model for fake news detection,''
+in \emph{Proc.\ ACM International Conference on Information and
+Knowledge Management (CIKM)}, pp.~797--806, 2017.
+
+\bibitem{miller1995wordnet}
+G.~A.~Miller,
+``{WordNet}: A lexical database for {English},''
+\emph{Communications of the ACM}, vol.~38, no.~11, pp.~39--41, 1995.
+
+\bibitem{pedregosa2011scikit}
+F.~Pedregosa et~al.,
+``Scikit-learn: Machine learning in {Python},''
+\emph{Journal of Machine Learning Research}, vol.~12, pp.~2825--2830, 2011.
+
+\bibitem{wolf2020transformers}
+T.~Wolf et~al.,
+``Transformers: State-of-the-art natural language processing,''
+in \emph{Proc.\ EMNLP: System Demonstrations}, pp.~38--45, 2020.
+
+\end{thebibliography}
+
+\end{document}
