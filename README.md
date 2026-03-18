@@ -1,8 +1,6 @@
 # White-Box vs. Black-Box Fake News Detection: An Explainability Comparison Using SHAP
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Framework: PyTorch](https://img.shields.io/badge/Framework-PyTorch-ee4c2c.svg)](https://pytorch.org/)
 [![XAI: SHAP](https://img.shields.io/badge/XAI-SHAP-green.svg)](https://github.com/shap/shap)
 
 An explainability and performance benchmarking suite comparing interpretable white-box models (Decision Trees) and complex black-box architectures (DistilRoBERTa) for automated fake news detection. Utilizing the game-theoretic framework of **SHAP (SHapley Additive exPlanations)**, this project evaluates classifiers across three dimensions: classification performance, explanation stability, and explanation fidelity. It also features a lexical debiasing pass to address dataset leakage artifacts.
